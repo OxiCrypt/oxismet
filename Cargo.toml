@@ -1,0 +1,15 @@
+[package]
+name = "oxismet"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aes-gcm = "0.11.0"
+argon2 = "0.5.3"
+rand = "0.10.2"
+[lib]
+name = "smet"
+path = "src/lib.rs"
+[[bin]]
+name = "oxismet"
+path = "src/bin.rs"
