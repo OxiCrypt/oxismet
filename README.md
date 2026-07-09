@@ -1,7 +1,7 @@
-# OxiSmet
+# OxiSMET
 This is OxiSMET(OxiCrypt Server Mass Encryption Tool)
 It is tailored for servers
-## Why OxiSmet?
+## Why OxiSMET?
 * Small Codebase.
 With OxiSMET, you have a tiny codebase consisting of the bare essentials and nothing more.
 * 100% compatibility.
