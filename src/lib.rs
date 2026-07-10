@@ -2,6 +2,9 @@
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce, aead::Aead};
 use argon2::{Algorithm::Argon2id, Argon2, ParamsBuilder, Version::V0x13};
 use rand::{RngExt, rng};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+
+use crate::Error::ConversionError;
 const MEM_COST: u32 = 20000;
 const PARALLELISM: u32 = 4;
 const ITERATION_COST: u32 = 4;
@@ -9,15 +12,48 @@ pub struct EncryptedData {
     pub bytes: Vec<u8>,
     pub nonce: GcmNonce,
 }
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Gcm256Key([u8; 32]);
 impl Gcm256Key {
     #[must_use]
-    pub fn from_slice(slice: &[u8; 32]) -> Self {
+    fn from_slice(slice: &[u8; 32]) -> Self {
         Self(*slice)
     }
     #[must_use]
-    pub fn as_slice(&self) -> &[u8; 32] {
+    fn as_slice(&self) -> &[u8; 32] {
         &self.0
+    }
+    /// Exposes a key encrypted with the given KEK
+    /// ## WARNING
+    /// Encrypting ~2^32 DEKS with one KEK makes Nonce Reuse a non-negligible factor!
+    /// To mitigate this, please rotate KEKs regularly as Nonce Reuse is catastrophic.
+    /// # Errors
+    /// Can error out during Encryption. No further information can be given, as `aes-gcm::Error` is opaque.
+    pub fn expose_with_kek(&self, kek: &[u8; 32]) -> Result<(Vec<u8>, GcmNonce), Error> {
+        let mut randgen = rng();
+        let nonce = GcmNonce::from_slice(&randgen.random());
+        let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from(*kek));
+        Ok((
+            cipher.encrypt(&Nonce::from(nonce.0), self.0.as_slice())?,
+            nonce,
+        ))
+    }
+    /// Recovers a key with the source(encrypted DEK) and the KEK
+    /// # Errors
+    /// Can error out during Decryption. No further information can be given, as `aes-gcm::Error` is opaque.
+    pub fn recover_with_kek(
+        source: &[u8; 48],
+        kek: &[u8; 32],
+        nonce: &GcmNonce,
+    ) -> Result<Gcm256Key, Error> {
+        let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from(*kek));
+        let plaintext = Zeroizing::new(cipher.decrypt(&Nonce::from(nonce.0), source.as_slice())?);
+        Ok(Gcm256Key::from_slice(
+            plaintext
+                .as_slice()
+                .try_into()
+                .map_err(|_| ConversionError)?,
+        ))
     }
 }
 pub struct GcmNonce([u8; 12]);
@@ -51,6 +87,9 @@ pub enum Error {
     ArgonParams,
     /// I have no idea what this means because the argon2 crate Docs won't tell me.
     Argon2Hashing,
+    /// Another error that should be held up by the invariant that a 48-byte ciphertext + auth tag will produce 32-byte plaintext.
+    /// Report an issue if this occurs.
+    ConversionError,
 }
 impl From<aes_gcm::Error> for Error {
     fn from(_: aes_gcm::Error) -> Self {
@@ -81,10 +120,10 @@ pub fn encrypt_with_random_key(bytes: &[u8]) -> Result<(EncryptedData, Gcm256Key
 /// # Errors
 /// The only error that can happen is during decryption, and that will return `Error::Aes`.
 /// The cause of the Error cannot be known as `aes-gcm::Error` is a unit struct.
-pub fn decrypt_with_key(bytes: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> Result<Vec<u8>, Error> {
-    let key = Key::<Aes256Gcm>::from(*key);
+pub fn decrypt_with_key(bytes: &[u8], key: &Gcm256Key, nonce: &GcmNonce) -> Result<Vec<u8>, Error> {
+    let key = Key::<Aes256Gcm>::from(*key.as_slice());
     let cipher = Aes256Gcm::new(&key);
-    let nonce = Nonce::from(*nonce);
+    let nonce = Nonce::from(*nonce.as_slice());
     Ok(cipher.decrypt(&nonce, bytes)?)
 }
 /// Encrypts using provided password, uses AES-256-GCM and Argon2 under the hood.

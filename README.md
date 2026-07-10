@@ -9,6 +9,9 @@ I am building OxiSMET from the ground up so no change is ever breaking. ALl lega
 * Full Headlessness
 Coming into this project, there is a major selling point: Headlessness. It can operate from a bash script, POSIX sh, or anything capable of running a command.
 Library is available so that any Rust program can call upon OxiSMET to outsource the heavy lifting.
+* KEK-based
+* Simply takes a 32-byte key(hex or file) for KEK in CLI, or just 32 bytes in the library.
+* Also supports password mode for zero-trust user secrets
 ## Security Notes
 * Not suitable for operation on processors that do not have Constant-Time multiplication
 * Uses the following primitives, with the crate providing said primitive in parentheses: AES-GCM(aes-gcm), Argon2(argon2)
