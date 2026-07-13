@@ -1,10 +1,10 @@
 #![warn(clippy::pedantic)]
 mod kek;
+mod passwd;
 use clap::Parser;
-
 use std::{
     fs::File,
-    io::{Read, Seek, SeekFrom, Write},
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::ExitCode,
 };
@@ -76,11 +76,18 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
                 kek::encrypt_with_kek(&bytes, &kek_bytes, &args.file, &mut outfile)
             }
             EncOrDec::Decrypt { dek_encrypted } => {
-                decrypt_with_kek(&bytes, &kek_bytes, dek_encrypted, &mut outfile)
+                kek::decrypt_with_kek(&bytes, &kek_bytes, dek_encrypted, &mut outfile)
             }
         }
-    } else if let Some(_password) = args.password {
-        todo!("Password Pipeline")
+    } else if let Some(password) = args.password {
+        match args.command {
+            EncOrDec::Encrypt => {
+                passwd::encrypt_with_password(&password, bytes.as_slice(), &mut outfile)
+            }
+            EncOrDec::Decrypt { dek_encrypted: _ } => {
+                passwd::decrypt_with_password(&password, bytes.as_slice(), &mut outfile)
+            }
+        }
     } else {
         eprintln!("Must provide Password or KEK to proceed.");
         Err(ExitCode::FAILURE)
@@ -114,77 +121,4 @@ fn create_output_file(path: PathBuf) -> Result<File, ExitCode> {
         ExitCode::FAILURE
     })?;
     Ok(outfile)
-}
-
-fn read_wrapped_dek(path: &Path) -> Result<([u8; 48], [u8; 12]), ExitCode> {
-    let mut wrapped_dek = [0u8; 48];
-    let mut dek_nonce = [0u8; 12];
-    let mut keyfile = File::open(path).map_err(|e| {
-        eprintln!("Error: Failed to open encrypted DEK file: {e}");
-        ExitCode::FAILURE
-    })?;
-    keyfile.seek(SeekFrom::Start(0)).map_err(|e| {
-        eprintln!("Error: Failed to seek to beginning of encrypted DEK file: {e}");
-        ExitCode::FAILURE
-    })?;
-    keyfile.read_exact(&mut wrapped_dek).map_err(|e| {
-        eprintln!("Error: Failed to read wrapped DEK: {e}");
-        ExitCode::FAILURE
-    })?;
-    keyfile.read_exact(&mut dek_nonce).map_err(|e| {
-        eprintln!("Error: Failed to read nonce of wrapped DEK: {e}");
-        ExitCode::FAILURE
-    })?;
-    Ok((wrapped_dek, dek_nonce))
-}
-
-fn decrypt_with_kek(
-    bytes: &[u8],
-    kek_bytes: &[u8; 32],
-    dek_encrypted: Option<PathBuf>,
-    outfile: &mut File,
-) -> Result<(), ExitCode> {
-    let Some(dek_path) = dek_encrypted else {
-        // Already validated before reading the input file; kept so this match arm is total.
-        eprintln!("Error: dek_encrypted must be provided when using a KEK for decryption.");
-        return Err(ExitCode::FAILURE);
-    };
-    let (wrapped_dek, dek_nonce) = read_wrapped_dek(&dek_path)?;
-
-    let dek = smet::Gcm256Key::recover_with_kek(
-        &wrapped_dek,
-        kek_bytes,
-        &smet::GcmNonce::from_slice(&dek_nonce),
-    )
-    .map_err(|_| {
-        eprintln!("Error: Failed to unwrap DEK with KEK. No further info available.");
-        ExitCode::FAILURE
-    })?;
-
-    let Some((version_bytes, rest)) = bytes.split_first_chunk::<8>() else {
-        eprintln!("Error: Input file too short to contain a version header.");
-        return Err(ExitCode::FAILURE);
-    };
-    if *version_bytes != VERSION.to_be_bytes() {
-        eprintln!(
-            "Error: Unsupported file version {}. This build supports version {VERSION}.",
-            u64::from_be_bytes(*version_bytes)
-        );
-        return Err(ExitCode::FAILURE);
-    }
-    let Some((nonce_bytes, ciphertext)) = rest.split_first_chunk::<12>() else {
-        eprintln!("Error: Input file too short to contain a nonce.");
-        return Err(ExitCode::FAILURE);
-    };
-    let plaintext =
-        smet::decrypt_with_key(ciphertext, &dek, &smet::GcmNonce::from_slice(nonce_bytes))
-            .map_err(|_| {
-                eprintln!("Error in Decryption. No further info available.");
-                ExitCode::FAILURE
-            })?;
-    outfile.write_all(&plaintext).map_err(|e| {
-        eprintln!("Error: Failed to write plaintext to output file: {e}");
-        ExitCode::FAILURE
-    })?;
-    Ok(())
 }
