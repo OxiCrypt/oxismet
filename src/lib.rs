@@ -5,6 +5,8 @@ use rand::{RngExt, rng};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::Error::ConversionError;
+#[cfg(test)]
+mod tests;
 const MEM_COST: u32 = 20000;
 const PARALLELISM: u32 = 4;
 const ITERATION_COST: u32 = 4;
