@@ -55,7 +55,9 @@ fn output_file_generator(command: &EncOrDec, input_path: &Path) -> Result<PathBu
             {
                 Ok(input_path.with_extension(""))
             } else {
-                eprintln!("Error: No output file provided for Decrypt mode, and input is not a .smet file!");
+                eprintln!(
+                    "Error: No output file provided for Decrypt mode, and input is not a .smet file!"
+                );
                 Err(ExitCode::FAILURE)
             }
         }
@@ -75,10 +77,10 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
     let bytes = read_input_file(&args.file)?;
 
     // Both paths need a file to output to
-    let mut outfile = create_output_file(
-        args.output
-            .unwrap_or(output_file_generator(&args.command, &args.file)?),
-    )?;
+    let mut outfile = create_output_file(match args.output {
+        Some(p) => p,
+        None => output_file_generator(&args.command, &args.file)?,
+    })?;
 
     if let Some(kek) = args.kek {
         if args.password.is_some() {
