@@ -15,4 +15,4 @@ Library is available so that any Rust program can call upon OxiSMET to outsource
 ## Security Notes
 * Not suitable for operation on processors that do not have Constant-Time multiplication
 * Uses the following primitives, with the crate providing said primitive in parentheses: AES-GCM(aes-gcm), Argon2(argon2)
-* Does not use any libraries outside aes-gcm, argon2, rand, zeroize, and std
+* Does not use any libraries outside aes-gcm, argon2, rand, zeroize, clap(CLI only), and std
