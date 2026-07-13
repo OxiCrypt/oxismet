@@ -83,6 +83,7 @@ impl Salt {
 /// This type is opaque as the `Error` type of `aes_gcm` is opaque for security
 /// This leads to no information being recoverable from the error and thus this Error cannot be better
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// Error in encryption or decryption. That's all we know.
     Aes,
