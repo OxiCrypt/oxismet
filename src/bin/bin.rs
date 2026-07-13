@@ -77,11 +77,11 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
     let bytes = read_input_file(&args.file)?;
 
     // Both paths need a file to output to and KEK Encrypt specifically needs outfile path, doesn't hurt
-    let outfile_path = output_file_generator(&args.command, &args.file)?;
-    let mut outfile = create_output_file(match args.output {
+    let outfile_path = match args.output {
         Some(p) => p,
-        None => outfile_path.clone(),
-    })?;
+        None => output_file_generator(&args.command, &args.file)?,
+    };
+    let mut outfile = create_output_file(outfile_path.clone())?;
 
     if let Some(kek) = args.kek {
         if args.password.is_some() {
