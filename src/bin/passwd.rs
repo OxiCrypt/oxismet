@@ -30,24 +30,28 @@ pub fn decrypt_with_password(
     bytes: &[u8],
     buffer: &mut File,
 ) -> Result<(), ExitCode> {
-    let version = u64::from_be_bytes(
-        bytes[0..8].try_into().map_err(|_| ExitCode::FAILURE)?, /* This Error is impossible, 8 = 8 */
-    );
+    let Some((version_bytes, rest)) = bytes.split_first_chunk::<8>() else {
+        eprintln!("Error: Input file too short to contain a version header.");
+        return Err(ExitCode::FAILURE);
+    };
+    let version = u64::from_be_bytes(*version_bytes);
     if version != VERSION {
         eprintln!("Error: Unsupported File Version: {version}.");
         return Err(ExitCode::FAILURE);
     }
-    let nonce = &bytes[8..20];
-    let salt = &bytes[20..36];
+    let Some((nonce_bytes, rest)) = rest.split_first_chunk::<12>() else {
+        eprintln!("Error: Input file too short to contain a nonce.");
+        return Err(ExitCode::FAILURE);
+    };
+    let Some((salt_bytes, ciphertext)) = rest.split_first_chunk::<16>() else {
+        eprintln!("Error: Input file too short to contain a salt.");
+        return Err(ExitCode::FAILURE);
+    };
     let plaintext = smet::decrypt_with_password(
-        bytes,
+        ciphertext,
         password,
-        &Salt::from_slice(
-            salt.try_into().map_err(|_| ExitCode::FAILURE)?, /* This Error is impossible, 16 = 16 */
-        ),
-        &GcmNonce::from_slice(
-            nonce.try_into().map_err(|_| ExitCode::FAILURE)?, /* This Error is impossible, 12 = 12 */
-        ),
+        &Salt::from_slice(salt_bytes),
+        &GcmNonce::from_slice(nonce_bytes),
     )
     .map_err(|_| ExitCode::FAILURE)?;
     buffer
