@@ -3,6 +3,9 @@ name = "oxismet"
 version = "0.1.0"
 edition = "2024"
 authors = ["Raj Singh"]
+description = "A mass encryption tool for servers"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/OxiCrypt/oxismet"
 autobins = false
 [dependencies]
 aes-gcm = "0.11.0"
