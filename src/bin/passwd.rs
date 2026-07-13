@@ -9,20 +9,28 @@ pub fn encrypt_with_password(
     bytes: &[u8],
     buffer: &mut File,
 ) -> Result<(), ExitCode> {
-    let (encrypted_data, salt) =
-        smet::encrypt_with_password(bytes, password).map_err(|_| ExitCode::FAILURE)?;
-    buffer
-        .write_all(&VERSION.to_be_bytes())
-        .map_err(|_| ExitCode::FAILURE)?;
+    let (encrypted_data, salt) = smet::encrypt_with_password(bytes, password).map_err(|_| {
+        eprintln!("Error in Encryption. No further info available.");
+        ExitCode::FAILURE
+    })?;
+    buffer.write_all(&VERSION.to_be_bytes()).map_err(|e| {
+        eprintln!("Error: Failed to write version to output file: {e}");
+        ExitCode::FAILURE
+    })?;
     buffer
         .write_all(encrypted_data.nonce.as_slice())
-        .map_err(|_| ExitCode::FAILURE)?;
-    buffer
-        .write_all(salt.as_slice())
-        .map_err(|_| ExitCode::FAILURE)?;
-    buffer
-        .write_all(&encrypted_data.bytes)
-        .map_err(|_| ExitCode::FAILURE)?;
+        .map_err(|e| {
+            eprintln!("Error: Failed to write nonce to output file: {e}");
+            ExitCode::FAILURE
+        })?;
+    buffer.write_all(salt.as_slice()).map_err(|e| {
+        eprintln!("Error: Failed to write salt to output file: {e}");
+        ExitCode::FAILURE
+    })?;
+    buffer.write_all(&encrypted_data.bytes).map_err(|e| {
+        eprintln!("Error: Failed to write ciphertext to output file: {e}");
+        ExitCode::FAILURE
+    })?;
     Ok(())
 }
 pub fn decrypt_with_password(
@@ -53,9 +61,13 @@ pub fn decrypt_with_password(
         &Salt::from_slice(salt_bytes),
         &GcmNonce::from_slice(nonce_bytes),
     )
-    .map_err(|_| ExitCode::FAILURE)?;
-    buffer
-        .write_all(plaintext.as_slice())
-        .map_err(|_| ExitCode::FAILURE)?;
+    .map_err(|_| {
+        eprintln!("Error in Decryption. No further info available.");
+        ExitCode::FAILURE
+    })?;
+    buffer.write_all(plaintext.as_slice()).map_err(|e| {
+        eprintln!("Error: Failed to write plaintext to output file: {e}");
+        ExitCode::FAILURE
+    })?;
     Ok(())
 }
