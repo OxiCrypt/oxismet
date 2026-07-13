@@ -25,7 +25,7 @@ pub fn read_kek_bytes(path: &Path) -> Result<[u8; 32], ExitCode> {
 pub fn encrypt_with_kek(
     bytes: &[u8],
     kek_bytes: &[u8; 32],
-    input_path: &Path,
+    output_path: &Path,
     outfile: &mut File,
 ) -> Result<(), ExitCode> {
     let (encrypted_data, dek) = smet::encrypt_with_random_key(bytes).map_err(|_| {
@@ -37,7 +37,7 @@ pub fn encrypt_with_kek(
         ExitCode::FAILURE
     })?;
 
-    let mut keyout = File::create(input_path.with_added_extension("oxky")).map_err(|e| {
+    let mut keyout = File::create(output_path.with_extension("oxky")).map_err(|e| {
         eprintln!("Error creating output file for wrapped DEK: {e}");
         ExitCode::FAILURE
     })?;

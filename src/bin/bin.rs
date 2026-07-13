@@ -76,10 +76,11 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
     // Both paths need the bytes of the input file
     let bytes = read_input_file(&args.file)?;
 
-    // Both paths need a file to output to
+    // Both paths need a file to output to and KEK Encrypt specifically needs outfile path, doesn't hurt
+    let outfile_path = output_file_generator(&args.command, &args.file)?;
     let mut outfile = create_output_file(match args.output {
         Some(p) => p,
-        None => output_file_generator(&args.command, &args.file)?,
+        None => outfile_path.clone(),
     })?;
 
     if let Some(kek) = args.kek {
@@ -91,7 +92,7 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
 
         match args.command {
             EncOrDec::Encrypt => {
-                kek::encrypt_with_kek(&bytes, &kek_bytes, &args.file, &mut outfile)
+                kek::encrypt_with_kek(&bytes, &kek_bytes, &outfile_path, &mut outfile)
             }
             EncOrDec::Decrypt { dek_encrypted } => {
                 kek::decrypt_with_kek(&bytes, &kek_bytes, dek_encrypted, &mut outfile)
