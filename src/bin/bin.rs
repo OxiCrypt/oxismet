@@ -1,15 +1,17 @@
 #![warn(clippy::pedantic)]
+mod header;
 mod kek;
 mod passwd;
 use clap::Parser;
 use std::{
     fs::File,
-    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::ExitCode,
 };
 
-const VERSION: u64 = 0;
+/// On-disk format version this build writes. Decryption also accepts version 0
+/// (the legacy single-blob format) for backward compatibility.
+const VERSION: u64 = 1;
 #[derive(Parser)]
 #[command(name = "oxismet", about = "A Headless Encryption Tool for Servers.")]
 #[command(author, version)]
@@ -73,15 +75,15 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
         return Err(ExitCode::FAILURE);
     }
 
-    // Both paths need the bytes of the input file
-    let bytes = read_input_file(&args.file)?;
+    // The input is streamed chunk-by-chunk, so open it as a reader rather than slurping it.
+    let mut infile = open_input_file(&args.file)?;
 
     // Both paths need a file to output to and KEK Encrypt specifically needs outfile path, doesn't hurt
     let outfile_path = match args.output {
         Some(p) => p,
         None => output_file_generator(&args.command, &args.file)?,
     };
-    let mut outfile = create_output_file(outfile_path.clone())?;
+    let mut outfile = create_output_file(&outfile_path)?;
 
     if let Some(kek) = args.kek {
         if args.password.is_some() {
@@ -92,19 +94,19 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
 
         match args.command {
             EncOrDec::Encrypt => {
-                kek::encrypt_with_kek(&bytes, &kek_bytes, &outfile_path, &mut outfile)
+                kek::encrypt_with_kek(&mut infile, &kek_bytes, &outfile_path, &mut outfile)
             }
             EncOrDec::Decrypt { dek_encrypted } => {
-                kek::decrypt_with_kek(&bytes, &kek_bytes, dek_encrypted, &mut outfile)
+                kek::decrypt_with_kek(&mut infile, &kek_bytes, dek_encrypted, &mut outfile)
             }
         }
     } else if let Some(password) = args.password {
         match args.command {
             EncOrDec::Encrypt => {
-                passwd::encrypt_with_password(&password, bytes.as_slice(), &mut outfile)
+                passwd::encrypt_with_password(&password, &mut infile, &mut outfile)
             }
             EncOrDec::Decrypt { dek_encrypted: _ } => {
-                passwd::decrypt_with_password(&password, bytes.as_slice(), &mut outfile)
+                passwd::decrypt_with_password(&password, &mut infile, &mut outfile)
             }
         }
     } else {
@@ -113,31 +115,16 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
     }
 }
 
-fn read_input_file(path: &Path) -> Result<Vec<u8>, ExitCode> {
-    let mut bytes: Vec<u8> = Vec::new();
-    let mut file = File::open(path).map_err(|e| {
-        eprintln!("Error: Failed to read input File: {e}");
+fn open_input_file(path: &Path) -> Result<File, ExitCode> {
+    File::open(path).map_err(|e| {
+        eprintln!("Error: Failed to open input file: {e}");
         ExitCode::FAILURE
-    })?;
-    file.seek(SeekFrom::Start(0)).map_err(|e| {
-        eprintln!("Error: Failed to seek to beginning of input file: {e}");
-        ExitCode::FAILURE
-    })?;
-    file.read_to_end(&mut bytes).map_err(|e| {
-        eprintln!("Error: Failed to read input file: {e}");
-        ExitCode::FAILURE
-    })?;
-    Ok(bytes)
+    })
 }
 
-fn create_output_file(path: PathBuf) -> Result<File, ExitCode> {
-    let mut outfile = File::create(path).map_err(|e| {
+fn create_output_file(path: &Path) -> Result<File, ExitCode> {
+    File::create(path).map_err(|e| {
         eprintln!("Error creating output file for ciphertext: {e}");
         ExitCode::FAILURE
-    })?;
-    outfile.seek(SeekFrom::Start(0)).map_err(|e| {
-        eprintln!("Error seeking to beginning of output file: {e}");
-        ExitCode::FAILURE
-    })?;
-    Ok(outfile)
+    })
 }

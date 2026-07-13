@@ -1,4 +1,6 @@
 use crate::VERSION;
+use crate::header::{read_field, report_stream_error, write_field};
+use smet::{DEFAULT_CHUNK_SIZE, GcmNonce};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
@@ -22,16 +24,13 @@ pub fn read_kek_bytes(path: &Path) -> Result<[u8; 32], ExitCode> {
     })?;
     Ok(kek_bytes)
 }
-pub fn encrypt_with_kek(
-    bytes: &[u8],
+pub fn encrypt_with_kek<R: Read, W: Write>(
+    reader: &mut R,
     kek_bytes: &[u8; 32],
     output_path: &Path,
-    outfile: &mut File,
+    writer: &mut W,
 ) -> Result<(), ExitCode> {
-    let (encrypted_data, dek) = smet::encrypt_with_random_key(bytes).map_err(|_| {
-        eprintln!("Error in Encryption. No further info available.");
-        ExitCode::FAILURE
-    })?;
+    let dek = smet::Gcm256Key::random();
     let wrapped_dek = dek.expose_with_kek(kek_bytes).map_err(|_| {
         eprintln!("Failure while encrypting DEK with KEK. No further info available.");
         ExitCode::FAILURE
@@ -41,65 +40,35 @@ pub fn encrypt_with_kek(
         eprintln!("Error creating output file for wrapped DEK: {e}");
         ExitCode::FAILURE
     })?;
-    keyout.seek(SeekFrom::Start(0)).map_err(|e| {
-        eprintln!("Error seeking to beginning of wrapped DEK output file: {e}");
-        ExitCode::FAILURE
-    })?;
-    keyout.write_all(&wrapped_dek.0).map_err(|e| {
-        eprintln!("Error: Failed to write Wrapped DEK to output file: {e}");
-        ExitCode::FAILURE
-    })?;
-    keyout.write_all(wrapped_dek.1.as_slice()).map_err(|e| {
-        eprintln!("Error: Failed to write Nonce of Wrapped DEK to output file: {e}");
-        ExitCode::FAILURE
-    })?;
+    write_field(&mut keyout, &wrapped_dek.0, "wrapped DEK")?;
+    write_field(&mut keyout, wrapped_dek.1.as_slice(), "nonce of wrapped DEK")?;
 
-    outfile.write_all(&VERSION.to_be_bytes()).map_err(|e| {
-        eprintln!("Error: Failed to write version to output file: {e}");
-        ExitCode::FAILURE
-    })?;
-    outfile
-        .write_all(encrypted_data.nonce.as_slice())
-        .map_err(|e| {
-            eprintln!("Error: Failed to write nonce to output file: {e}");
-            ExitCode::FAILURE
-        })?;
-    outfile.write_all(&encrypted_data.bytes).map_err(|e| {
-        eprintln!("Error: Failed to write ciphertext to output file: {e}");
-        ExitCode::FAILURE
-    })?;
-    Ok(())
+    let root_nonce = GcmNonce::random();
+    write_field(writer, &VERSION.to_be_bytes(), "version")?;
+    write_field(writer, &DEFAULT_CHUNK_SIZE.to_be_bytes(), "chunk size")?;
+    write_field(writer, root_nonce.as_slice(), "root nonce")?;
+
+    smet::encrypt_stream(reader, writer, &dek, &root_nonce, DEFAULT_CHUNK_SIZE)
+        .map_err(|e| report_stream_error(e, "encryption"))
 }
 fn read_wrapped_dek(path: &Path) -> Result<([u8; 48], [u8; 12]), ExitCode> {
-    let mut wrapped_dek = [0u8; 48];
-    let mut dek_nonce = [0u8; 12];
     let mut keyfile = File::open(path).map_err(|e| {
         eprintln!("Error: Failed to open encrypted DEK file: {e}");
         ExitCode::FAILURE
     })?;
-    keyfile.seek(SeekFrom::Start(0)).map_err(|e| {
-        eprintln!("Error: Failed to seek to beginning of encrypted DEK file: {e}");
-        ExitCode::FAILURE
-    })?;
-    keyfile.read_exact(&mut wrapped_dek).map_err(|e| {
-        eprintln!("Error: Failed to read wrapped DEK: {e}");
-        ExitCode::FAILURE
-    })?;
-    keyfile.read_exact(&mut dek_nonce).map_err(|e| {
-        eprintln!("Error: Failed to read nonce of wrapped DEK: {e}");
-        ExitCode::FAILURE
-    })?;
+    let wrapped_dek = read_field::<48, _>(&mut keyfile, "wrapped DEK")?;
+    let dek_nonce = read_field::<12, _>(&mut keyfile, "nonce of wrapped DEK")?;
     Ok((wrapped_dek, dek_nonce))
 }
 
-pub fn decrypt_with_kek(
-    bytes: &[u8],
+pub fn decrypt_with_kek<R: Read, W: Write>(
+    reader: &mut R,
     kek_bytes: &[u8; 32],
     dek_encrypted: Option<PathBuf>,
-    outfile: &mut File,
+    writer: &mut W,
 ) -> Result<(), ExitCode> {
     let Some(dek_path) = dek_encrypted else {
-        // Already validated before reading the input file; kept so this match arm is total.
+        // Already validated before opening the input file; kept so this match arm is total.
         eprintln!("Error: dek_encrypted must be provided when using a KEK for decryption.");
         return Err(ExitCode::FAILURE);
     };
@@ -108,37 +77,45 @@ pub fn decrypt_with_kek(
     let dek = smet::Gcm256Key::recover_with_kek(
         &wrapped_dek,
         kek_bytes,
-        &smet::GcmNonce::from_slice(&dek_nonce),
+        &GcmNonce::from_slice(&dek_nonce),
     )
     .map_err(|_| {
         eprintln!("Error: Failed to unwrap DEK with KEK. No further info available.");
         ExitCode::FAILURE
     })?;
 
-    let Some((version_bytes, rest)) = bytes.split_first_chunk::<8>() else {
-        eprintln!("Error: Input file too short to contain a version header.");
-        return Err(ExitCode::FAILURE);
-    };
-    if *version_bytes != VERSION.to_be_bytes() {
-        eprintln!(
-            "Error: Unsupported file version {}. This build supports version {VERSION}.",
-            u64::from_be_bytes(*version_bytes)
-        );
-        return Err(ExitCode::FAILURE);
+    let version = u64::from_be_bytes(read_field::<8, _>(reader, "version header")?);
+    match version {
+        1 => {
+            let chunk_size = u32::from_be_bytes(read_field::<4, _>(reader, "chunk size")?);
+            let root_nonce = GcmNonce::from_slice(&read_field::<12, _>(reader, "root nonce")?);
+            smet::decrypt_stream(reader, writer, &dek, &root_nonce, chunk_size)
+                .map_err(|e| report_stream_error(e, "decryption"))
+        }
+        0 => decrypt_v0(reader, writer, &dek),
+        other => {
+            eprintln!("Error: Unsupported file version {other}. This build supports version {VERSION}.");
+            Err(ExitCode::FAILURE)
+        }
     }
-    let Some((nonce_bytes, ciphertext)) = rest.split_first_chunk::<12>() else {
-        eprintln!("Error: Input file too short to contain a nonce.");
-        return Err(ExitCode::FAILURE);
-    };
-    let plaintext =
-        smet::decrypt_with_key(ciphertext, &dek, &smet::GcmNonce::from_slice(nonce_bytes))
-            .map_err(|_| {
-                eprintln!("Error in Decryption. No further info available.");
-                ExitCode::FAILURE
-            })?;
-    outfile.write_all(&plaintext).map_err(|e| {
-        eprintln!("Error: Failed to write plaintext to output file: {e}");
+}
+
+/// Decrypts a legacy version-0 (single-blob) KEK file: 12-byte nonce followed by the
+/// whole ciphertext. Kept so files written by pre-streaming releases still decrypt.
+fn decrypt_v0<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    dek: &smet::Gcm256Key,
+) -> Result<(), ExitCode> {
+    let nonce = GcmNonce::from_slice(&read_field::<12, _>(reader, "nonce")?);
+    let mut ciphertext = Vec::new();
+    reader.read_to_end(&mut ciphertext).map_err(|e| {
+        eprintln!("Error: Failed to read ciphertext: {e}");
         ExitCode::FAILURE
     })?;
-    Ok(())
+    let plaintext = smet::decrypt_with_key(&ciphertext, dek, &nonce).map_err(|_| {
+        eprintln!("Error in Decryption. No further info available.");
+        ExitCode::FAILURE
+    })?;
+    write_field(writer, &plaintext, "plaintext")
 }
