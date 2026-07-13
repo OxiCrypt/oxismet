@@ -18,4 +18,4 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
       - name: Forbidden Clippy
-        run: cargo clippy -- -D clippy::pedantic
+        run: cargo clippy -- -D warnings
