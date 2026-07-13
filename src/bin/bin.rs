@@ -46,6 +46,22 @@ fn main() -> ExitCode {
     }
 }
 
+fn output_file_generator(command: &EncOrDec, input_path: &Path) -> Result<PathBuf, ExitCode> {
+    match command {
+        EncOrDec::Encrypt => Ok(input_path.with_added_extension("smet")),
+        EncOrDec::Decrypt { dek_encrypted: _ } => {
+            if let Some(ext) = input_path.extension()
+                && ext.to_str() == Some("smet")
+            {
+                Ok(input_path.with_extension(""))
+            } else {
+                eprintln!("Error: No output file provided for Decrypt mode, and input is not a .smet file!");
+                Err(ExitCode::FAILURE)
+            }
+        }
+    }
+}
+
 fn run(args: OxiSmet) -> Result<(), ExitCode> {
     if let EncOrDec::Decrypt { dek_encrypted } = &args.command
         && args.kek.is_some()
@@ -61,7 +77,7 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
     // Both paths need a file to output to
     let mut outfile = create_output_file(
         args.output
-            .unwrap_or_else(|| args.file.with_added_extension("smet")),
+            .unwrap_or(output_file_generator(&args.command, &args.file)?),
     )?;
 
     if let Some(kek) = args.kek {
