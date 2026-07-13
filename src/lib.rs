@@ -14,6 +14,8 @@ pub struct EncryptedData {
     pub bytes: Vec<u8>,
     pub nonce: GcmNonce,
 }
+/// Note: `as_slice` and `from_slice` not provided, as the secret is dangerous for exposure without KEK wrapping.
+/// This is intentional, do not make any Issues about this.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Gcm256Key([u8; 32]);
 impl Gcm256Key {
