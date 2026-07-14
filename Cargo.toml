@@ -7,7 +7,6 @@ description = "A mass encryption tool for servers"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/OxiCrypt/oxismet"
 autobins = false
-autolibs = false
 [dependencies]
 aes-gcm = "0.11.0"
 argon2 = "0.5.3"
