@@ -77,7 +77,6 @@ jobs:
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/oxismet${{matrix.suffix}} dist/oxismet-${{ matrix.arch }}-${{matrix.os_name}}${{ matrix.suffix }}
-          chmod +x dist/*
       - name: Upload to Release
         uses: softprops/action-gh-release@v1
         with:
