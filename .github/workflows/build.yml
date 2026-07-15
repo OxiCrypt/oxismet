@@ -62,10 +62,16 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install cross
+        if: matrix.os_name == 'linux' && matrix.arch == 'aarch64'
         run: cargo install cross
 
-      - name: Build
+      - name: Build (cross)
+        if: matrix.os_name == 'linux' && matrix.arch == 'aarch64'
         run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build
+        if: "!(matrix.os_name == 'linux' && matrix.arch == 'aarch64')"
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare binary
         run: |
