@@ -5,6 +5,7 @@ mod passwd;
 use clap::Parser;
 use std::{
     fs::File,
+    io::Read,
     path::{Path, PathBuf},
     process::ExitCode,
 };
@@ -18,6 +19,11 @@ const VERSION: u64 = 1;
 struct OxiSmet {
     #[arg(short, long, help = "Password to be used for encryption/decryption.")]
     password: Option<String>,
+    #[arg(
+        long,
+        help = "Password to be used for encryption/decryption, sourced from a file."
+    )]
+    password_file: Option<PathBuf>,
     #[arg(
         short,
         long,
@@ -76,17 +82,18 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
     }
 
     // The input is streamed chunk-by-chunk, so open it as a reader rather than slurping it.
-    let mut infile = open_input_file(&args.file)?;
+    let mut infile = open_file_helper(&args.file, "Error opening input file.")?;
 
     // Both paths need a file to output to and KEK Encrypt specifically needs outfile path, doesn't hurt
     let outfile_path = match args.output {
         Some(p) => p,
         None => output_file_generator(&args.command, &args.file)?,
     };
-    let mut outfile = create_output_file(&outfile_path)?;
+    let mut outfile =
+        create_file_helper(&outfile_path, "Error creating output file for ciphertext.")?;
 
     if let Some(kek) = args.kek {
-        if args.password.is_some() {
+        if args.password.is_some() || args.password_file.is_some() {
             eprintln!("Fatal: Password and KEK provided");
             return Err(ExitCode::FAILURE);
         }
@@ -101,6 +108,25 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
             }
         }
     } else if let Some(password) = args.password {
+        if args.password_file.is_some() {
+            eprintln!("Fatal: Password and Password File provided");
+            return Err(ExitCode::FAILURE);
+        }
+        match args.command {
+            EncOrDec::Encrypt => {
+                passwd::encrypt_with_password(&password, &mut infile, &mut outfile)
+            }
+            EncOrDec::Decrypt { dek_encrypted: _ } => {
+                passwd::decrypt_with_password(&password, &mut infile, &mut outfile)
+            }
+        }
+    } else if let Some(passpath) = args.password_file {
+        let mut passfile = open_file_helper(&passpath, "Failed to open path to password file")?;
+        let mut password = String::new();
+        passfile.read_to_string(&mut password).map_err(|e| {
+            eprintln!("Error reading password file: {e}");
+            ExitCode::FAILURE
+        })?;
         match args.command {
             EncOrDec::Encrypt => {
                 passwd::encrypt_with_password(&password, &mut infile, &mut outfile)
@@ -115,16 +141,18 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
     }
 }
 
-fn open_input_file(path: &Path) -> Result<File, ExitCode> {
+fn open_file_helper(path: &Path, msg: &str) -> Result<File, ExitCode> {
     File::open(path).map_err(|e| {
-        eprintln!("Error: Failed to open input file: {e}");
+        eprintln!("{msg}");
+        eprintln!("Root Error: {e}");
         ExitCode::FAILURE
     })
 }
 
-fn create_output_file(path: &Path) -> Result<File, ExitCode> {
+fn create_file_helper(path: &Path, error_message: &str) -> Result<File, ExitCode> {
     File::create(path).map_err(|e| {
-        eprintln!("Error creating output file for ciphertext: {e}");
+        eprintln!("{error_message}");
+        eprintln!("Root Error: {e}");
         ExitCode::FAILURE
     })
 }
