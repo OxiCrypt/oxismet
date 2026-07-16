@@ -22,14 +22,14 @@ pub fn write_field<W: Write>(writer: &mut W, bytes: &[u8], what: &str) -> Result
     })
 }
 
-/// Maps a `smet::Error` from a streaming call to a CLI error with a contextual message.
+/// Maps a `smetlib::Error` from a streaming call to a CLI error with a contextual message.
 /// `context` is a noun phrase such as "encryption" or "decryption".
-pub fn report_stream_error(e: smet::Error, context: &str) -> ExitCode {
+pub fn report_stream_error(e: smetlib::Error, context: &str) -> ExitCode {
     match e {
-        smet::Error::InvalidChunkSize => {
+        smetlib::Error::InvalidChunkSize => {
             eprintln!("Error: File header declares an invalid or unsupported chunk size.");
         }
-        smet::Error::Io(io) => eprintln!("Error: I/O failure during {context}: {io}"),
+        smetlib::Error::Io(io) => eprintln!("Error: I/O failure during {context}: {io}"),
         _ => eprintln!("Error during {context}. No further info available."),
     }
     ExitCode::FAILURE

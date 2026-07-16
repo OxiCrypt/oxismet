@@ -1,6 +1,6 @@
 use crate::VERSION;
 use crate::header::{read_field, report_stream_error, write_field};
-use smet::{DEFAULT_CHUNK_SIZE, GcmNonce};
+use smetlib::{DEFAULT_CHUNK_SIZE, GcmNonce};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
@@ -30,7 +30,7 @@ pub fn encrypt_with_kek<R: Read, W: Write>(
     output_path: &Path,
     writer: &mut W,
 ) -> Result<(), ExitCode> {
-    let dek = smet::Gcm256Key::random();
+    let dek = smetlib::Gcm256Key::random();
     let wrapped_dek = dek.expose_with_kek(kek_bytes).map_err(|_| {
         eprintln!("Failure while encrypting DEK with KEK. No further info available.");
         ExitCode::FAILURE
@@ -48,7 +48,7 @@ pub fn encrypt_with_kek<R: Read, W: Write>(
     write_field(writer, &DEFAULT_CHUNK_SIZE.to_be_bytes(), "chunk size")?;
     write_field(writer, root_nonce.as_slice(), "root nonce")?;
 
-    smet::encrypt_stream(reader, writer, &dek, &root_nonce, DEFAULT_CHUNK_SIZE)
+    smetlib::encrypt_stream(reader, writer, &dek, &root_nonce, DEFAULT_CHUNK_SIZE)
         .map_err(|e| report_stream_error(e, "encryption"))
 }
 fn read_wrapped_dek(path: &Path) -> Result<([u8; 48], [u8; 12]), ExitCode> {
@@ -74,7 +74,7 @@ pub fn decrypt_with_kek<R: Read, W: Write>(
     };
     let (wrapped_dek, dek_nonce) = read_wrapped_dek(&dek_path)?;
 
-    let dek = smet::Gcm256Key::recover_with_kek(
+    let dek = smetlib::Gcm256Key::recover_with_kek(
         &wrapped_dek,
         kek_bytes,
         &GcmNonce::from_slice(&dek_nonce),
@@ -89,7 +89,7 @@ pub fn decrypt_with_kek<R: Read, W: Write>(
         1 => {
             let chunk_size = u32::from_be_bytes(read_field::<4, _>(reader, "chunk size")?);
             let root_nonce = GcmNonce::from_slice(&read_field::<12, _>(reader, "root nonce")?);
-            smet::decrypt_stream(reader, writer, &dek, &root_nonce, chunk_size)
+            smetlib::decrypt_stream(reader, writer, &dek, &root_nonce, chunk_size)
                 .map_err(|e| report_stream_error(e, "decryption"))
         }
         0 => decrypt_v0(reader, writer, &dek),
@@ -105,7 +105,7 @@ pub fn decrypt_with_kek<R: Read, W: Write>(
 fn decrypt_v0<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
-    dek: &smet::Gcm256Key,
+    dek: &smetlib::Gcm256Key,
 ) -> Result<(), ExitCode> {
     let nonce = GcmNonce::from_slice(&read_field::<12, _>(reader, "nonce")?);
     let mut ciphertext = Vec::new();
@@ -113,7 +113,7 @@ fn decrypt_v0<R: Read, W: Write>(
         eprintln!("Error: Failed to read ciphertext: {e}");
         ExitCode::FAILURE
     })?;
-    let plaintext = smet::decrypt_with_key(&ciphertext, dek, &nonce).map_err(|_| {
+    let plaintext = smetlib::decrypt_with_key(&ciphertext, dek, &nonce).map_err(|_| {
         eprintln!("Error in Decryption. No further info available.");
         ExitCode::FAILURE
     })?;

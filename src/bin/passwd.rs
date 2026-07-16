@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::process::ExitCode;
 
-use smet::{DEFAULT_CHUNK_SIZE, GcmNonce, Salt};
+use smetlib::{DEFAULT_CHUNK_SIZE, GcmNonce, Salt};
 
 use crate::VERSION;
 use crate::header::{read_field, report_stream_error, write_field};
@@ -12,7 +12,7 @@ pub fn encrypt_with_password<R: Read, W: Write>(
     writer: &mut W,
 ) -> Result<(), ExitCode> {
     let salt = Salt::random();
-    let key = smet::derive_key_from_password(password, &salt).map_err(|_| {
+    let key = smetlib::derive_key_from_password(password, &salt).map_err(|_| {
         eprintln!("Error deriving key from password. No further info available.");
         ExitCode::FAILURE
     })?;
@@ -23,7 +23,7 @@ pub fn encrypt_with_password<R: Read, W: Write>(
     write_field(writer, root_nonce.as_slice(), "root nonce")?;
     write_field(writer, salt.as_slice(), "salt")?;
 
-    smet::encrypt_stream(reader, writer, &key, &root_nonce, DEFAULT_CHUNK_SIZE)
+    smetlib::encrypt_stream(reader, writer, &key, &root_nonce, DEFAULT_CHUNK_SIZE)
         .map_err(|e| report_stream_error(e, "encryption"))
 }
 pub fn decrypt_with_password<R: Read, W: Write>(
@@ -37,11 +37,11 @@ pub fn decrypt_with_password<R: Read, W: Write>(
             let chunk_size = u32::from_be_bytes(read_field::<4, _>(reader, "chunk size")?);
             let root_nonce = GcmNonce::from_slice(&read_field::<12, _>(reader, "root nonce")?);
             let salt = Salt::from_slice(&read_field::<16, _>(reader, "salt")?);
-            let key = smet::derive_key_from_password(password, &salt).map_err(|_| {
+            let key = smetlib::derive_key_from_password(password, &salt).map_err(|_| {
                 eprintln!("Error deriving key from password. No further info available.");
                 ExitCode::FAILURE
             })?;
-            smet::decrypt_stream(reader, writer, &key, &root_nonce, chunk_size)
+            smetlib::decrypt_stream(reader, writer, &key, &root_nonce, chunk_size)
                 .map_err(|e| report_stream_error(e, "decryption"))
         }
         0 => decrypt_v0(password, reader, writer),
@@ -67,7 +67,7 @@ fn decrypt_v0<R: Read, W: Write>(
         ExitCode::FAILURE
     })?;
     let plaintext =
-        smet::decrypt_with_password(&ciphertext, password, &salt, &nonce).map_err(|_| {
+        smetlib::decrypt_with_password(&ciphertext, password, &salt, &nonce).map_err(|_| {
             eprintln!("Error in Decryption. No further info available.");
             ExitCode::FAILURE
         })?;

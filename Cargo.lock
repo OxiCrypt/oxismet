@@ -367,6 +367,7 @@ dependencies = [
  "argon2",
  "clap",
  "rand",
+ "smetlib",
  "zeroize",
 ]
 
@@ -438,6 +439,18 @@ name = "rand_core"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
+
+[[package]]
+name = "smetlib"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed151cb874957b4f6a86eff1beabac630fd88db56979cc721b939e5f3ac93a3e"
+dependencies = [
+ "aes-gcm",
+ "argon2",
+ "rand",
+ "zeroize",
+]
 
 [[package]]
 name = "strsim"
