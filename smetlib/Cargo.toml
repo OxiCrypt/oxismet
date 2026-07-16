@@ -2,7 +2,9 @@
 name = "smetlib"
 version = "0.1.0"
 edition = "2024"
-
+repository = "https://github.com/OxiCrypt/oxismet"
+license = "GPL-3.0-or-later"
+description = "Server Mass Encryption Library"
 [dependencies]
 aes-gcm = "0.11.0"
 argon2 = "0.5.3"
