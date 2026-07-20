@@ -1,4 +1,5 @@
 #![warn(clippy::pedantic)]
+mod atomic;
 mod header;
 mod kek;
 mod passwd;
@@ -30,6 +31,12 @@ struct OxiSmet {
         help = "Path to Key Encryption Key to be used for encryption/decryption."
     )]
     kek: Option<PathBuf>,
+    #[arg(
+        short,
+        long,
+        help = "Special mode: rotates the KEK protecting an encrypted DEK in place. \nTreats --file as the path to the encrypted DEK, this path as the old KEK, and --kek as the new KEK. \nIgnored if --kek is not supplied."
+    )]
+    migrate_dek: Option<PathBuf>,
     #[arg(short, long, help = "Path to the file to be encrypted/decrypted.")]
     file: PathBuf,
     #[arg(short, long, help = "Path to the output file.")]
@@ -73,6 +80,18 @@ fn output_file_generator(command: &EncOrDec, input_path: &Path) -> Result<PathBu
 }
 
 fn run(args: OxiSmet) -> Result<(), ExitCode> {
+    if let Some(new_kek_path) = &args.kek
+        && let Some(old_kek_path) = &args.migrate_dek
+    {
+        if args.password.is_some() || args.password_file.is_some() {
+            eprintln!("Fatal: Password and KEK provided");
+            return Err(ExitCode::FAILURE);
+        }
+        let old_kek_bytes = kek::read_kek_bytes(old_kek_path)?;
+        let new_kek_bytes = kek::read_kek_bytes(new_kek_path)?;
+        return kek::migrate_dek(&args.file, &old_kek_bytes, &new_kek_bytes);
+    }
+
     if let EncOrDec::Decrypt { dek_encrypted } = &args.command
         && args.kek.is_some()
         && dek_encrypted.is_none()
@@ -90,9 +109,9 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
         None => output_file_generator(&args.command, &args.file)?,
     };
     let mut outfile =
-        create_file_helper(&outfile_path, "Error creating output file for ciphertext.")?;
+        atomic::AtomicFile::create(&outfile_path, "Error creating output file for ciphertext.")?;
 
-    if let Some(kek) = args.kek {
+    let result = if let Some(kek) = args.kek {
         if args.password.is_some() || args.password_file.is_some() {
             eprintln!("Fatal: Password and KEK provided");
             return Err(ExitCode::FAILURE);
@@ -138,20 +157,14 @@ fn run(args: OxiSmet) -> Result<(), ExitCode> {
     } else {
         eprintln!("Must provide Password or KEK to proceed.");
         Err(ExitCode::FAILURE)
-    }
+    };
+    result?;
+    outfile.commit()
 }
 
 fn open_file_helper(path: &Path, msg: &str) -> Result<File, ExitCode> {
     File::open(path).map_err(|e| {
         eprintln!("{msg}");
-        eprintln!("Root Error: {e}");
-        ExitCode::FAILURE
-    })
-}
-
-fn create_file_helper(path: &Path, error_message: &str) -> Result<File, ExitCode> {
-    File::create(path).map_err(|e| {
-        eprintln!("{error_message}");
         eprintln!("Root Error: {e}");
         ExitCode::FAILURE
     })

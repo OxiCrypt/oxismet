@@ -1,4 +1,5 @@
 use crate::VERSION;
+use crate::atomic::AtomicFile;
 use crate::header::{read_field, report_stream_error, write_field};
 use smetlib::{DEFAULT_CHUNK_SIZE, GcmNonce};
 use std::{
@@ -36,12 +37,13 @@ pub fn encrypt_with_kek<R: Read, W: Write>(
         ExitCode::FAILURE
     })?;
 
-    let mut keyout = File::create(output_path.with_extension("oxky")).map_err(|e| {
-        eprintln!("Error creating output file for wrapped DEK: {e}");
-        ExitCode::FAILURE
-    })?;
+    let mut keyout = AtomicFile::create(
+        &output_path.with_extension("oxky"),
+        "Error creating output file for wrapped DEK.",
+    )?;
     write_field(&mut keyout, &wrapped_dek.0, "wrapped DEK")?;
     write_field(&mut keyout, wrapped_dek.1.as_slice(), "nonce of wrapped DEK")?;
+    keyout.commit()?;
 
     let root_nonce = GcmNonce::random();
     write_field(writer, &VERSION.to_be_bytes(), "version")?;
@@ -118,4 +120,30 @@ fn decrypt_v0<R: Read, W: Write>(
         ExitCode::FAILURE
     })?;
     write_field(writer, &plaintext, "plaintext")
+}
+
+/// Rewraps an encrypted DEK under a new KEK, replacing `dek_path` in place.
+/// Writes to a temporary sibling and renames over the original so a failure partway
+/// through can never leave the only copy of the wrapped DEK truncated or corrupted.
+pub fn migrate_dek(dek_path: &Path, old_kek: &[u8; 32], new_kek: &[u8; 32]) -> Result<(), ExitCode> {
+    let (wrapped_dek, dek_nonce) = read_wrapped_dek(dek_path)?;
+    let dek = smetlib::Gcm256Key::recover_with_kek(
+        &wrapped_dek,
+        old_kek,
+        &GcmNonce::from_slice(&dek_nonce),
+    )
+    .map_err(|_| {
+        eprintln!("Error: Failed to unwrap DEK with old KEK. No further info available.");
+        ExitCode::FAILURE
+    })?;
+
+    let rewrapped_dek = dek.expose_with_kek(new_kek).map_err(|_| {
+        eprintln!("Error: Failed to wrap DEK with new KEK. No further info available.");
+        ExitCode::FAILURE
+    })?;
+
+    let mut keyout = AtomicFile::create(dek_path, "Error writing migrated DEK.")?;
+    write_field(&mut keyout, &rewrapped_dek.0, "wrapped DEK")?;
+    write_field(&mut keyout, rewrapped_dek.1.as_slice(), "nonce of wrapped DEK")?;
+    keyout.commit()
 }
